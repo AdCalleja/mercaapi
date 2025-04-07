@@ -13,7 +13,7 @@ from pymupdf.__main__ import main as fitz_command
 from aiocache import Cache
 from aiocache.serializers import JsonSerializer
 
-from app.models import ExtractedTicketInfo, NutritionalInformation
+from app.models import ExtractedTicketInfo, NutritionalInformationBase
 
 
 class AIInformationExtractor:
@@ -22,7 +22,7 @@ class AIInformationExtractor:
         groq_api_key: str,
         gemini_api_key: str,
         groq_model: str = "llama-3.1-70b-versatile",
-        gemini_model: str = "gemini-1.5-flash-latest",
+        gemini_model: str = "gemini-2.0-flash",
     ):
         # Groq configuration
         self.groq_api_key = groq_api_key
@@ -269,7 +269,7 @@ class AIInformationExtractor:
 
     async def process_file_nutrition(
         self, file_path: Union[str, Path], prompt: str
-    ) -> NutritionalInformation:
+    ) -> NutritionalInformationBase:
         file_path = Path(file_path)
 
         if file_path.suffix.lower() in [".jpg", ".jpeg", ".png"]:
@@ -281,13 +281,13 @@ class AIInformationExtractor:
 
     async def _process_image_nutrition(
         self, file_data: bytes, prompt: str
-    ) -> NutritionalInformation:
+    ) -> NutritionalInformationBase:
         file_uri = self._upload_file(file_data, "image/jpeg")
         return self._extract_nutrition_info_from_file(file_uri, prompt)
 
     def _extract_nutrition_info_from_file(
         self, file_uri: str, prompt: str
-    ) -> NutritionalInformation:
+    ) -> NutritionalInformationBase:
         headers = {"Content-Type": "application/json"}
         data = {
             "contents": [
@@ -324,7 +324,7 @@ class AIInformationExtractor:
             json_obj = json.loads(json_str)
             logger.info(f"Information extracted: {json_obj}")
 
-            return NutritionalInformation.model_validate(json_obj)
+            return NutritionalInformationBase.model_validate(json_obj)
         else:
             logger.error(f"Error: {response.status_code}, {response.text}")
             raise Exception(f"Error: {response.status_code}, {response.text}")

@@ -1,19 +1,15 @@
 services:
   app:
     build: .
-    image: ghcr.io/m0wer/mercaapi:master
     command: python -m fastapi run --reload --port 80
+    volumes:
+      - /home/adrian/code/mercaapi_db/data/mercaapi/db:/app/db
     ports:
       - "8000:80"
-    volumes:
-      - ./app:/app/app
-      - ./mercadona.db:/app/mercadona.db
-      - ./main.py:/app/main.py
-      - ./alembic.ini:/app/alembic.ini
     environment:
       - PYTHONPATH=/app
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - GROQ_API_KEY=${GROQ_API_KEY}
+      # - GEMINI_API_KEY=${GEMINI_API_KEY}
+      # - GROQ_API_KEY=${GROQ_API_KEY}
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
     depends_on:
@@ -24,37 +20,26 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 512M
-    restart: always
-
-  tests:
-    build: .
-    image: ghcr.io/m0wer/mercaapi:master
-    command: sh -c exit
-    volumes:
-      - .:/app
-    environment:
-      - PYTHONPATH=/app
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-    depends_on:
-      - redis
-    user: '1000:1000'
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 256M
+          cpus: '2.0'
+          memory: 2G
+    env_file: stack.env
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=false"
+      - "traefik.http.routers.mercaapi.rule=Host(`mercaapi.sgn.space`)"
+      - "traefik.http.routers.mercaapi.entrypoints=websecure"
+      - "traefik.http.services.mercaapi.loadbalancer.server.port=80"
+      - "traefik.http.middlewares.cors-headers.headers.accesscontrolalloworiginlist=https://mercaticket.sgn.space,http://mercaticket.sgn.space:3000"
+      - "traefik.http.middlewares.cors-headers.headers.accesscontrolallowmethods=GET,POST,OPTIONS"
+      - "traefik.http.middlewares.cors-headers.headers.accesscontrolallowheaders=Content-Type,Authorization"
+      - "traefik.http.middlewares.cors-headers.headers.accesscontrolmaxage=100"
+      - "traefik.http.middlewares.cors-headers.headers.addvaryheader=true"
+      - "traefik.http.routers.mercaapi.middlewares=cors-headers@docker"
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     volumes:
-      - ./redis:/data
+      - /home/adrian/code/mercaapi_db/data/mercaapi/redis:/data
     user: '1000:1000'
     deploy:
       resources:
@@ -65,14 +50,13 @@ services:
 
   worker-high:
     build: .
-    command: python -m celery -A app.worker worker -Q high -c 8 -l DEBUG
+    command: python -m celery -A app.celery_config.celery_app worker -Q high -c 8 -l DEBUG
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - PYTHONPATH=/app
     volumes:
-      - ./app:/app/app
-      - ./mercadona.db:/app/mercadona.db
+      - /home/adrian/code/mercaapi_db/data/mercaapi/db:/app/db
     depends_on:
       - redis
     user: '1000:1000'
@@ -85,14 +69,13 @@ services:
 
   worker-low:
     build: .
-    command: python -m celery -A app.worker worker -Q low -c 1 -l DEBUG
+    command: python -m celery -A app.celery_config.celery_app worker -Q low -c 1 -l DEBUG
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - PYTHONPATH=/app
     volumes:
-      - ./app:/app/app
-      - ./mercadona.db:/app/mercadona.db
+      - /home/adrian/code/mercaapi_db/data/mercaapi/db:/app/db
     depends_on:
       - redis
     user: '1000:1000'
@@ -105,7 +88,7 @@ services:
 
   flower:
     image: mher/flower
-    command: python -m celery flower --broker=redis://redis:6379/0 --port=5555
+    command: python -m celery flower --broker=redis://redis:6379/0 --port=5555 --basic-auth=admin:pass123 --url-prefix=/flower
     ports:
       - "5555:5555"
     environment:
@@ -121,3 +104,9 @@ services:
           cpus: "1"
           memory: 256M
     restart: always
+    labels:
+      - "traefik.enable=false"
+      - "traefik.http.routers.flower.rule=Host(`mercaapi.sgn.space`) && PathPrefix(`/flower`)"
+      - "traefik.http.routers.flower.entrypoints=websecure"
+      - "traefik.http.services.flower.loadbalancer.server.port=5555"
+      - "traefik.http.middlewares.strip-flower-prefix.stripprefix.prefixes=/flower"

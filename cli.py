@@ -1,5 +1,8 @@
 import asyncio
 import os
+import requests
+import tempfile
+from pathlib import Path
 
 import click
 from loguru import logger
@@ -9,8 +12,9 @@ from sqlalchemy.orm import joinedload
 from app.database import get_engine
 from app.parser import parse_mercadona
 from app.models import Product, NutritionalInformation, is_food_category
-from app.ai.nutrition_facts import NutritionFactsExtractor
-from app.ai.nutrition_estimator import estimate_nutritional_info
+from app.ai.ticket import AIInformationExtractor
+# TODO: Implement or import the estimate_nutritional_info function
+# from app.ai.nutrition_estimator import estimate_nutritional_info
 
 
 @click.group()
@@ -40,6 +44,52 @@ def clean_numeric(value):
     return value
 
 
+
+NUTRITION_PROMPT = """
+    Extract all nutritional information from this image.    
+    Provide the output as a JSON object with the following structure:
+    {
+        "calories": number,
+        "total_fat": number,
+        "saturated_fat": number,
+        "polyunsaturated_fat": number,
+        "monounsaturated_fat": number,
+        "trans_fat": number,
+        "total_carbohydrate": number,
+        "dietary_fiber": number,
+        "total_sugars": number,
+        "protein": number,
+        "salt": number
+    }
+    Use null for any values not present in the image.
+    Ensure all numeric values are numbers, not strings.
+    """
+
+def download_image(image_url: str) -> str:
+    """Download image from URL and save to temporary file, returning the file path"""
+    logger.debug(f"Downloading image from {image_url}")
+    response = requests.get(image_url)
+    if response.status_code != 200:
+        raise Exception(
+            f"Failed to download image. Status code: {response.status_code}"
+        )
+    
+    # Create a temporary file with the correct extension
+    suffix = ".jpg"  # Default to jpg
+    content_type = response.headers.get("Content-Type", "")
+    if "png" in content_type.lower():
+        suffix = ".png"
+    
+    # Save the image to a temporary file
+    fd, temp_path = tempfile.mkstemp(suffix=suffix)
+    try:
+        with os.fdopen(fd, 'wb') as temp_file:
+            temp_file.write(response.content)
+        return temp_path
+    except Exception as e:
+        os.unlink(temp_path)  # Clean up on error
+        raise e
+
 @cli.command()
 @click.option(
     "--reprocess-all",
@@ -50,7 +100,10 @@ def process_nutritional_information(reprocess_all):
     logger.info("Processing nutritional information for products")
     api_key = os.environ.get("GEMINI_API_KEY")
     assert api_key, "Please set the GEMINI_API_KEY environment variable"
-    nutrition_extractor = NutritionFactsExtractor(api_key)
+    nutrition_extractor = AIInformationExtractor(groq_api_key=None, gemini_api_key=api_key, gemini_model="gemini-2.0-flash-lite")
+
+    # Create an event loop for running async functions
+    loop = asyncio.get_event_loop()
 
     engine = get_engine()
     with Session(engine) as session:
@@ -75,16 +128,26 @@ def process_nutritional_information(reprocess_all):
                 if product.images:
                     for image in reversed(product.images):
                         try:
-                            nutritional_info = (
-                                nutrition_extractor.extract_nutrition_facts(
-                                    image.zoom_url
+                            # Download image to temporary file
+                            image_path = download_image(image.zoom_url)
+                            # Use run_until_complete to properly await the async function
+                            try:
+                                nutritional_info = loop.run_until_complete(
+                                    nutrition_extractor.process_file_nutrition(
+                                        image_path, NUTRITION_PROMPT
+                                    )
                                 )
-                            )
-                            if (
-                                nutritional_info is not None
-                                and nutritional_info["calories_kcal"] is not None
-                            ):
-                                break
+                                if (
+                                    nutritional_info is not None
+                                    and nutritional_info.calories is not None
+                                ):
+                                    break
+                            finally:
+                                # Clean up the temporary file
+                                try:
+                                    os.unlink(image_path)
+                                except Exception as cleanup_error:
+                                    logger.warning(f"Failed to clean up temporary file {image_path}: {cleanup_error}")
                         except Exception as e:
                             logger.error(
                                 f"Error processing image for product {product.id}: {str(e)}"
@@ -92,21 +155,23 @@ def process_nutritional_information(reprocess_all):
 
                 if (
                     nutritional_info is None
-                    or nutritional_info["calories_kcal"] is None
+                    or nutritional_info.calories is None
                 ):
                     logger.warning(
                         f"No nutritional information found in images for product {product.id}. Estimating using LLM."
                     )
-                    nutritional_info = estimate_nutritional_info(product)
+                    # # Check if estimate_nutritional_info is imported or defined
+                    # try:
+                    #     nutritional_info = estimate_nutritional_info(product)
+                    # except NameError:
+                    #     logger.error(f"Function estimate_nutritional_info is not defined. Skipping estimation.")
+                    #     nutritional_info = None
 
                 if nutritional_info:
-                    nutritional_info["calories"] = nutritional_info.pop(
-                        "calories_kcal", None
-                    )
-                    del nutritional_info["calories_kJ"]
+                    nutritional_info.calories = nutritional_info.calories
                     cleaned_info = {
-                        key: clean_numeric(value)
-                        for key, value in nutritional_info.items()
+                        key: clean_numeric(getattr(nutritional_info, key))
+                        for key in nutritional_info.model_fields
                     }
 
                     existing_info = product.nutritional_information

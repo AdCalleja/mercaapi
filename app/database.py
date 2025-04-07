@@ -1,7 +1,7 @@
 from sqlmodel import create_engine, Session
 from functools import lru_cache
 
-DATABASE_URL = "sqlite:///./mercadona.db"
+DATABASE_URL = "sqlite:////app/db/mercadona.db" #"sqlite:////home/adrian/code/mercaapi_db/data/mercaapi/db/mercadona.db"#"sqlite:////app/db/mercadona.db"
 
 
 @lru_cache()

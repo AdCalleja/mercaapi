@@ -6,5 +6,10 @@ redis/
 __pycache__/
 *.pyc
 .pytest_cache
+venv/
 
-.env
+*.env
+
+# VSCode
+.vscode/
+*.log
