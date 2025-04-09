@@ -16,6 +16,7 @@ from app.ai.ticket import AIInformationExtractor
 # TODO: Implement or import the estimate_nutritional_info function
 # from app.ai.nutrition_estimator import estimate_nutritional_info
 
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
 @click.group()
 def cli():
@@ -100,7 +101,7 @@ def process_nutritional_information(reprocess_all):
     logger.info("Processing nutritional information for products")
     api_key = os.environ.get("GEMINI_API_KEY")
     assert api_key, "Please set the GEMINI_API_KEY environment variable"
-    nutrition_extractor = AIInformationExtractor(groq_api_key=None, gemini_api_key=api_key, gemini_model="gemini-2.0-flash-lite")
+    nutrition_extractor = AIInformationExtractor(groq_api_key=None, gemini_api_key=api_key, gemini_model=GEMINI_MODEL)
 
     # Create an event loop for running async functions
     loop = asyncio.get_event_loop()
