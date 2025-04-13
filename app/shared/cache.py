@@ -63,6 +63,7 @@ def get_products_with_protein_from_db(session: Session) -> List[Product]:
             select(Product)
             .join(Product.nutritional_information)
             .where(
+                Product.packaging.is_not("Granel"),
                 NutritionalInformation.protein.is_not(None),
                 NutritionalInformation.protein > 0
             )
