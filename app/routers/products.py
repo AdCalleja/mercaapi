@@ -3,7 +3,7 @@ from sqlmodel import Session
 from app.database import get_session
 from app.models import ProductMatch, ProductPublic
 from app.worker import find_closest_products_with_preload
-from app.shared.cache import get_all_products
+from app.shared.cache import get_all_products, get_products_with_protein_from_db
 from typing import List
 from loguru import logger
 
@@ -57,6 +57,21 @@ async def get_closest_product(
         f"Found {len(matches)} matches for query: name='{name}', price={unit_price}"
     )
     return matches[:max_results]
+
+
+@router.get("/with-protein", response_model=List[ProductPublic])
+def get_products_with_protein(
+    skip: int = 0, 
+    limit: int = 100, 
+    session: Session = Depends(get_session)
+):
+    # Get products with protein using SQL-level filtering
+    products = get_products_with_protein_from_db(session)
+    
+    # Apply pagination
+    paginated_products = products[skip : skip + limit]
+    
+    return [ProductPublic.model_validate(product) for product in paginated_products]
 
 
 @router.get("/{product_id}", response_model=ProductPublic)

@@ -5,7 +5,7 @@ from loguru import logger
 from sqlmodel import select, Session
 from sqlalchemy.orm import joinedload
 
-from app.models import Product
+from app.models import Product, NutritionalInformation
 
 
 class Cache:
@@ -52,4 +52,33 @@ def get_all_products(session: Session) -> List[Product]:
         session.expunge(product)
 
     cache.set("all_products", products)
+    return list(products)
+
+
+def get_products_with_protein_from_db(session: Session) -> List[Product]:
+    """Get products that have nutritional information with non-zero protein content."""
+    logger.debug("Fetching products with protein from database")
+    products = (
+        session.exec(
+            select(Product)
+            .join(Product.nutritional_information)
+            .where(
+                NutritionalInformation.protein.is_not(None),
+                NutritionalInformation.protein > 0
+            )
+            .options(
+                joinedload(Product.category),  # type: ignore
+                joinedload(Product.images),  # type: ignore
+                joinedload(Product.nutritional_information),  # type: ignore
+                joinedload(Product.price_history),  # type: ignore
+            )
+        )
+        .unique()
+        .all()
+    )
+
+    # Detach products from the session
+    for product in products:
+        session.expunge(product)
+
     return list(products)
