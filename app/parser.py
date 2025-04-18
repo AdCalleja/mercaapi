@@ -36,7 +36,7 @@ class RateLimiter:
 
 @retry(
     stop=stop_after_attempt(3),
-    wait=wait_fixed(5),
+    wait=wait_fixed(60),
     retry=retry_if_exception_type(
         (
             aiohttp.ClientError,
@@ -171,7 +171,7 @@ async def parse_category_products(
                 logger.info(f"Updating existing product: ({product.id}) {product.name}")
                 db_product = db_session.exec(
                     select(Product).where(Product.id == product.id)
-                ).one()
+                ).unique().one()
 
                 if db_product.price != product.price:
                     logger.info(
